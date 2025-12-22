@@ -1,1 +1,2 @@
-public/models/
+# Exclude large OBJ files, but include compressed GLB
+public/models/*.obj
