@@ -51,15 +51,15 @@ export default function ProductPageClient({ product, relatedProducts }: ProductP
 
   return (
     <div className="min-h-screen bg-[#1A1A1A]">
-      {/* Breadcrumb */}
-      <div className="bg-[#2D2D2D] py-4">
+      {/* Breadcrumb - Sticky on mobile for easy navigation */}
+      <div className="bg-[#2D2D2D] py-3 sm:py-4 sticky top-16 sm:top-20 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Link
             href={`/products/${product.category}`}
-            className="inline-flex items-center gap-2 text-[#00B4D8] hover:text-white transition-colors"
+            className="inline-flex items-center gap-2 text-[#00B4D8] hover:text-white transition-colors py-1 touch-target"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back to {product.category.charAt(0).toUpperCase() + product.category.slice(1)}
+            <span className="text-sm sm:text-base">Back to {product.category.charAt(0).toUpperCase() + product.category.slice(1)}</span>
           </Link>
         </div>
       </div>

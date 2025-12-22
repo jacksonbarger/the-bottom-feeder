@@ -1,96 +1,170 @@
 "use client";
 
-import { Suspense, useRef } from "react";
-import { Canvas, useFrame, useLoader } from "@react-three/fiber";
-import { OrbitControls, Environment, Center } from "@react-three/drei";
-import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
-import * as THREE from "three";
+import { useState, useEffect, useRef, useCallback } from "react";
+import Image from "next/image";
+import { motion } from "framer-motion";
 
-interface ModelProps {
-  url: string;
-}
-
-function Model({ url }: ModelProps) {
-  const obj = useLoader(OBJLoader, url);
-  const meshRef = useRef<THREE.Group>(null);
-
-  // Apply a nice material to all meshes
-  obj.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
-      child.material = new THREE.MeshStandardMaterial({
-        color: "#1a1a2e",
-        metalness: 0.8,
-        roughness: 0.2,
-      });
-    }
-  });
-
-  return (
-    <Center>
-      <primitive
-        ref={meshRef}
-        object={obj}
-        scale={2}
-      />
-    </Center>
-  );
-}
-
-function LoadingSpinner() {
-  return (
-    <div className="absolute inset-0 flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-12 h-12 border-4 border-[#0077B6] border-t-transparent rounded-full animate-spin" />
-        <span className="text-gray-400 text-sm">Loading 3D Model...</span>
-      </div>
-    </div>
-  );
-}
+// Use frame-based animation instead of 3D model (model file too large for deployment)
+const FRAME_IMAGES = [
+  "/images/3d-viewer/frame-01.png",
+  "/images/3d-viewer/frame-02.png",
+  "/images/3d-viewer/frame-03.png",
+  "/images/3d-viewer/frame-04.png",
+  "/images/3d-viewer/frame-05.png",
+  "/images/3d-viewer/frame-06.png",
+  "/images/3d-viewer/frame-07.png",
+  "/images/3d-viewer/frame-08.png",
+];
 
 interface Product3DViewerProps {
   className?: string;
 }
 
 export default function Product3DViewer({ className = "" }: Product3DViewerProps) {
-  return (
-    <div className={`relative aspect-square bg-gradient-to-b from-[#1A1A1A] to-[#0D0D0D] rounded-2xl overflow-hidden ${className}`}>
-      <Suspense fallback={<LoadingSpinner />}>
-        <Canvas
-          camera={{ position: [0, 0, 5], fov: 45 }}
-          gl={{ antialias: true, alpha: true }}
-        >
-          {/* Lighting */}
-          <ambientLight intensity={0.5} />
-          <directionalLight position={[10, 10, 5]} intensity={1} />
-          <directionalLight position={[-10, -10, -5]} intensity={0.5} />
+  const [currentFrame, setCurrentFrame] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [imagesLoaded, setImagesLoaded] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastXRef = useRef(0);
 
-          {/* Environment for reflections */}
-          <Environment preset="city" />
+  // Preload all images
+  useEffect(() => {
+    const preloadImages = async () => {
+      const promises = FRAME_IMAGES.map((src) => {
+        return new Promise<void>((resolve) => {
+          const img = new window.Image();
+          img.onload = () => resolve();
+          img.onerror = () => resolve(); // Continue even if image fails
+          img.src = src;
+        });
+      });
+      await Promise.all(promises);
+      setImagesLoaded(true);
+    };
+    preloadImages();
+  }, []);
 
-          {/* The 3D Model */}
-          <Model url="/models/bottom-feeder.obj" />
+  // Mouse/Touch handlers for drag rotation
+  const handleStart = useCallback((clientX: number) => {
+    setIsDragging(true);
+    lastXRef.current = clientX;
+  }, []);
 
-          {/* Orbit Controls - allows drag to rotate */}
-          <OrbitControls
-            enableZoom={true}
-            enablePan={false}
-            minDistance={2}
-            maxDistance={10}
-            autoRotate={false}
-            rotateSpeed={0.5}
-          />
-        </Canvas>
-      </Suspense>
+  const handleMove = useCallback((clientX: number) => {
+    if (!isDragging) return;
 
-      {/* Instruction overlay */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none">
-        <div className="bg-black/60 backdrop-blur-sm px-4 py-2 rounded-full flex items-center gap-2">
-          <svg className="w-4 h-4 text-[#00B4D8]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          <span className="text-white/90 text-sm">Drag to rotate</span>
+    const deltaX = clientX - lastXRef.current;
+    const sensitivity = 5; // pixels per frame
+
+    if (Math.abs(deltaX) > sensitivity) {
+      const direction = deltaX > 0 ? 1 : -1;
+      setCurrentFrame((prev) => (prev + direction + FRAME_IMAGES.length) % FRAME_IMAGES.length);
+      lastXRef.current = clientX;
+    }
+  }, [isDragging]);
+
+  const handleEnd = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Mouse handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    handleStart(e.clientX);
+  };
+
+  // Touch handlers
+  const handleTouchStart = (e: React.TouchEvent) => {
+    handleStart(e.touches[0].clientX);
+  };
+
+  // Global event listeners
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => handleMove(e.clientX);
+    const onTouchMove = (e: TouchEvent) => handleMove(e.touches[0].clientX);
+
+    if (isDragging) {
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", handleEnd);
+      window.addEventListener("touchmove", onTouchMove);
+      window.addEventListener("touchend", handleEnd);
+    }
+
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", handleEnd);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", handleEnd);
+    };
+  }, [isDragging, handleMove, handleEnd]);
+
+  if (!imagesLoaded) {
+    return (
+      <div className={`relative aspect-square bg-gradient-to-b from-[#1A1A1A] to-[#0D0D0D] rounded-2xl overflow-hidden ${className}`}>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-12 h-12 border-4 border-[#0077B6] border-t-transparent rounded-full animate-spin" />
+            <span className="text-gray-400 text-sm">Loading 3D View...</span>
+          </div>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className={`relative aspect-square bg-gradient-to-b from-[#1A1A1A] to-[#0D0D0D] rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing ${className}`}
+      onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
+      style={{ touchAction: "none" }}
+    >
+      {/* Frame images */}
+      <div className="absolute inset-4 sm:inset-8">
+        {FRAME_IMAGES.map((src, index) => (
+          <Image
+            key={src}
+            src={src}
+            alt={`Product view ${index + 1}`}
+            fill
+            className={`object-contain transition-opacity duration-100 ${
+              index === currentFrame ? "opacity-100" : "opacity-0"
+            }`}
+            sizes="(max-width: 768px) 80vw, 40vw"
+            priority={index < 2}
+            draggable={false}
+          />
+        ))}
+      </div>
+
+      {/* Frame indicator */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5">
+        {FRAME_IMAGES.map((_, index) => (
+          <div
+            key={index}
+            className={`w-2 h-2 rounded-full transition-colors ${
+              index === currentFrame ? "bg-[#00B4D8]" : "bg-white/20"
+            }`}
+          />
+        ))}
+      </div>
+
+      {/* Instruction overlay - only show initially */}
+      {!isDragging && currentFrame === 0 && (
+        <motion.div
+          className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-none"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1 }}
+        >
+          <div className="bg-black/60 backdrop-blur-sm px-3 sm:px-4 py-2 rounded-full flex items-center gap-2">
+            <svg className="w-4 h-4 text-[#00B4D8]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span className="text-white/90 text-xs sm:text-sm">Drag to rotate</span>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }
