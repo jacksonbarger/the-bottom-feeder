@@ -2,7 +2,7 @@
 
 import { Suspense, useRef, useState, useEffect, useCallback } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Environment, Center } from "@react-three/drei";
+import { Environment } from "@react-three/drei";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as THREE from "three";
@@ -75,23 +75,36 @@ function Model({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const { scene, error } = useGLTFWithDraco(modelPath);
+  const { camera } = useThree();
+
+  // Center and scale the model once loaded
+  useEffect(() => {
+    if (scene && groupRef.current) {
+      // Calculate bounding box
+      const box = new THREE.Box3().setFromObject(scene);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+
+      // Move scene so its center is at origin
+      scene.position.x = -center.x;
+      scene.position.y = -center.y;
+      scene.position.z = -center.z;
+
+      // Calculate scale to fit nicely in view
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const scale = 2.5 / maxDim;
+      groupRef.current.scale.set(scale, scale, scale);
+    }
+  }, [scene, camera]);
 
   if (error || !scene) {
     return null;
   }
 
-  // Calculate scale to fit in view
-  const box = new THREE.Box3().setFromObject(scene);
-  const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z);
-  const scale = 2 / maxDim;
-
   return (
-    <Center>
-      <group ref={groupRef} rotation={[rotationX, rotationY, 0]} scale={[scale, scale, scale]}>
-        <primitive object={scene} />
-      </group>
-    </Center>
+    <group ref={groupRef} rotation={[rotationX, rotationY, 0]} position={[0, 0, 0]}>
+      <primitive object={scene} />
+    </group>
   );
 }
 
