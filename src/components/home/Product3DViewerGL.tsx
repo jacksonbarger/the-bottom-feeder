@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useRef, useState, useEffect } from "react";
+import { Suspense, useRef, useState, useEffect, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, useGLTF, Environment, Center } from "@react-three/drei";
+import { Environment } from "@react-three/drei";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as THREE from "three";
@@ -29,6 +29,18 @@ function useGLTFWithDraco(path: string) {
     loader.load(
       path,
       (result) => {
+        // Apply a nice material to all meshes since OBJ had no materials
+        result.scene.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            // Create a nice blue/teal plastic-like material matching the brand
+            child.material = new THREE.MeshStandardMaterial({
+              color: new THREE.Color("#0077B6"), // Brand blue
+              metalness: 0.3,
+              roughness: 0.4,
+              envMapIntensity: 1.0,
+            });
+          }
+        });
         setGltf(result.scene);
         setProgress(100);
       },
@@ -44,31 +56,62 @@ function useGLTFWithDraco(path: string) {
     );
 
     return () => {
-      dracoLoader.dispose();
+      // Don't dispose the shared dracoLoader
     };
   }, [path]);
 
   return { scene: gltf, error, progress };
 }
 
-// 3D Model component with auto-rotation
-function Model({ modelPath }: { modelPath: string }) {
+// 3D Model component with drag-to-rotate (turntable style)
+function Model({
+  modelPath,
+  rotationY,
+  setRotationY
+}: {
+  modelPath: string;
+  rotationY: number;
+  setRotationY: (value: number | ((prev: number) => number)) => void;
+}) {
   const groupRef = useRef<THREE.Group>(null);
-  const { scene, error, progress } = useGLTFWithDraco(modelPath);
+  const { scene, error } = useGLTFWithDraco(modelPath);
   const [autoRotate, setAutoRotate] = useState(true);
+  const { gl } = useThree();
 
-  // Auto-rotate when not being interacted with
+  // Auto-rotate slowly when not being dragged
   useFrame((state, delta) => {
-    if (groupRef.current && autoRotate) {
-      groupRef.current.rotation.y += delta * 0.3;
+    if (groupRef.current) {
+      if (autoRotate) {
+        setRotationY((prev) => prev + delta * 0.3);
+      }
+      groupRef.current.rotation.y = rotationY;
     }
   });
 
-  if (error) {
-    return null;
-  }
+  // Listen for pointer events on the canvas
+  useEffect(() => {
+    const canvas = gl.domElement;
 
-  if (!scene) {
+    const handlePointerDown = () => {
+      setAutoRotate(false);
+    };
+
+    const handlePointerUp = () => {
+      setAutoRotate(true);
+    };
+
+    canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointerup", handlePointerUp);
+    canvas.addEventListener("pointerleave", handlePointerUp);
+
+    return () => {
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("pointerleave", handlePointerUp);
+    };
+  }, [gl]);
+
+  if (error || !scene) {
     return null;
   }
 
@@ -76,19 +119,13 @@ function Model({ modelPath }: { modelPath: string }) {
   const box = new THREE.Box3().setFromObject(scene);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  const scale = 2 / maxDim;
+  const scale = 2.5 / maxDim;
 
   const center = box.getCenter(new THREE.Vector3());
-  scene.position.sub(center);
+  scene.position.set(-center.x, -center.y, -center.z);
 
   return (
-    <group
-      ref={groupRef}
-      scale={[scale, scale, scale]}
-      onPointerDown={() => setAutoRotate(false)}
-      onPointerUp={() => setAutoRotate(true)}
-      onPointerLeave={() => setAutoRotate(true)}
-    >
+    <group ref={groupRef} scale={[scale, scale, scale]}>
       <primitive object={scene} />
     </group>
   );
@@ -97,7 +134,7 @@ function Model({ modelPath }: { modelPath: string }) {
 // Loading indicator
 function LoadingIndicator({ progress }: { progress: number }) {
   return (
-    <div className="absolute inset-0 flex items-center justify-center">
+    <div className="absolute inset-0 flex items-center justify-center z-10">
       <div className="flex flex-col items-center gap-4">
         <div className="w-12 h-12 border-4 border-[#0077B6] border-t-transparent rounded-full animate-spin" />
         <div className="text-center">
@@ -116,7 +153,10 @@ export default function Product3DViewerGL({
 }: Product3DViewerGLProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [rotationY, setRotationY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const lastXRef = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Check if model exists
   useEffect(() => {
@@ -132,6 +172,28 @@ export default function Product3DViewerGL({
         setIsLoading(false);
       });
   }, [modelPath]);
+
+  // Handle drag to rotate (turntable style - Y axis only)
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    setIsDragging(true);
+    lastXRef.current = e.clientX;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDragging) return;
+
+    const deltaX = e.clientX - lastXRef.current;
+    const sensitivity = 0.01; // radians per pixel
+
+    setRotationY((prev) => prev + deltaX * sensitivity);
+    lastXRef.current = e.clientX;
+  }, [isDragging]);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    setIsDragging(false);
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+  }, []);
 
   if (hasError) {
     return (
@@ -152,36 +214,38 @@ export default function Product3DViewerGL({
 
   return (
     <div
+      ref={containerRef}
       className={`relative aspect-square bg-gradient-to-b from-[#1A1A1A] to-[#0D0D0D] rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing ${className}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+      style={{ touchAction: "none" }}
     >
-      {isLoading && <LoadingIndicator progress={progress} />}
+      {isLoading && <LoadingIndicator progress={0} />}
 
       <Canvas
-        camera={{ position: [0, 0, 4], fov: 45 }}
+        camera={{ position: [0, 0.5, 4], fov: 40 }}
         gl={{ antialias: true, alpha: true }}
         dpr={[1, 2]}
       >
-        {/* Lighting */}
-        <ambientLight intensity={0.5} />
-        <directionalLight position={[10, 10, 5]} intensity={1} />
-        <directionalLight position={[-10, -10, -5]} intensity={0.5} />
+        {/* Lighting - brighter for better visibility */}
+        <ambientLight intensity={0.8} />
+        <directionalLight position={[5, 5, 5]} intensity={1.5} />
+        <directionalLight position={[-5, 3, -5]} intensity={0.8} />
+        <directionalLight position={[0, -5, 0]} intensity={0.3} />
 
         {/* Environment for reflections */}
-        <Environment preset="studio" />
+        <Environment preset="city" />
 
-        {/* Model */}
+        {/* Model - rotates in place */}
         <Suspense fallback={null}>
-          <Model modelPath={modelPath} />
+          <Model
+            modelPath={modelPath}
+            rotationY={rotationY}
+            setRotationY={setRotationY}
+          />
         </Suspense>
-
-        {/* Controls */}
-        <OrbitControls
-          enableZoom={false}
-          enablePan={false}
-          minPolarAngle={Math.PI / 4}
-          maxPolarAngle={Math.PI / 1.5}
-          rotateSpeed={0.5}
-        />
       </Canvas>
 
       {/* Instruction overlay */}
