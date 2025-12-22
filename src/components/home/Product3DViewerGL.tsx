@@ -1,8 +1,8 @@
 "use client";
 
 import { Suspense, useRef, useState, useEffect, useCallback } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment } from "@react-three/drei";
+import { Canvas, useThree } from "@react-three/fiber";
+import { Environment, Center } from "@react-three/drei";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as THREE from "three";
@@ -63,71 +63,35 @@ function useGLTFWithDraco(path: string) {
   return { scene: gltf, error, progress };
 }
 
-// 3D Model component with drag-to-rotate (turntable style)
+// 3D Model component - static, centered, draggable
 function Model({
   modelPath,
+  rotationX,
   rotationY,
-  setRotationY
 }: {
   modelPath: string;
+  rotationX: number;
   rotationY: number;
-  setRotationY: (value: number | ((prev: number) => number)) => void;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const { scene, error } = useGLTFWithDraco(modelPath);
-  const [autoRotate, setAutoRotate] = useState(true);
-  const { gl } = useThree();
-
-  // Auto-rotate slowly when not being dragged
-  useFrame((state, delta) => {
-    if (groupRef.current) {
-      if (autoRotate) {
-        setRotationY((prev) => prev + delta * 0.3);
-      }
-      groupRef.current.rotation.y = rotationY;
-    }
-  });
-
-  // Listen for pointer events on the canvas
-  useEffect(() => {
-    const canvas = gl.domElement;
-
-    const handlePointerDown = () => {
-      setAutoRotate(false);
-    };
-
-    const handlePointerUp = () => {
-      setAutoRotate(true);
-    };
-
-    canvas.addEventListener("pointerdown", handlePointerDown);
-    canvas.addEventListener("pointerup", handlePointerUp);
-    canvas.addEventListener("pointerleave", handlePointerUp);
-
-    return () => {
-      canvas.removeEventListener("pointerdown", handlePointerDown);
-      canvas.removeEventListener("pointerup", handlePointerUp);
-      canvas.removeEventListener("pointerleave", handlePointerUp);
-    };
-  }, [gl]);
 
   if (error || !scene) {
     return null;
   }
 
-  // Center and scale the model
+  // Calculate scale to fit in view
   const box = new THREE.Box3().setFromObject(scene);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  const scale = 2.5 / maxDim;
-
-  const center = box.getCenter(new THREE.Vector3());
-  scene.position.set(-center.x, -center.y, -center.z);
+  const scale = 2 / maxDim;
 
   return (
-    <group ref={groupRef} scale={[scale, scale, scale]}>
-      <primitive object={scene} />
-    </group>
+    <Center>
+      <group ref={groupRef} rotation={[rotationX, rotationY, 0]} scale={[scale, scale, scale]}>
+        <primitive object={scene} />
+      </group>
+    </Center>
   );
 }
 
@@ -153,9 +117,11 @@ export default function Product3DViewerGL({
 }: Product3DViewerGLProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [rotationX, setRotationX] = useState(0);
   const [rotationY, setRotationY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const lastXRef = useRef(0);
+  const lastYRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Check if model exists
@@ -173,10 +139,11 @@ export default function Product3DViewerGL({
       });
   }, [modelPath]);
 
-  // Handle drag to rotate (turntable style - Y axis only)
+  // Handle drag to rotate (both X and Y axes)
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     setIsDragging(true);
     lastXRef.current = e.clientX;
+    lastYRef.current = e.clientY;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }, []);
 
@@ -184,10 +151,13 @@ export default function Product3DViewerGL({
     if (!isDragging) return;
 
     const deltaX = e.clientX - lastXRef.current;
+    const deltaY = e.clientY - lastYRef.current;
     const sensitivity = 0.01; // radians per pixel
 
     setRotationY((prev) => prev + deltaX * sensitivity);
+    setRotationX((prev) => prev + deltaY * sensitivity);
     lastXRef.current = e.clientX;
+    lastYRef.current = e.clientY;
   }, [isDragging]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
@@ -225,11 +195,11 @@ export default function Product3DViewerGL({
       {isLoading && <LoadingIndicator progress={0} />}
 
       <Canvas
-        camera={{ position: [0, 0.5, 4], fov: 40 }}
+        camera={{ position: [0, 0, 4], fov: 45 }}
         gl={{ antialias: true, alpha: true }}
         dpr={[1, 2]}
       >
-        {/* Lighting - brighter for better visibility */}
+        {/* Lighting */}
         <ambientLight intensity={0.8} />
         <directionalLight position={[5, 5, 5]} intensity={1.5} />
         <directionalLight position={[-5, 3, -5]} intensity={0.8} />
@@ -238,12 +208,12 @@ export default function Product3DViewerGL({
         {/* Environment for reflections */}
         <Environment preset="city" />
 
-        {/* Model - rotates in place */}
+        {/* Model - centered, static until dragged */}
         <Suspense fallback={null}>
           <Model
             modelPath={modelPath}
+            rotationX={rotationX}
             rotationY={rotationY}
-            setRotationY={setRotationY}
           />
         </Suspense>
       </Canvas>
