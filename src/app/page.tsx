@@ -2,6 +2,7 @@ import HeroSection from "@/components/home/HeroSection";
 import Product360Section from "@/components/home/Product360Section";
 import FeaturedProducts from "@/components/home/FeaturedProducts";
 import FeaturesSection from "@/components/home/FeaturesSection";
+import CompetitorComparison from "@/components/home/CompetitorComparison";
 import CTASection from "@/components/home/CTASection";
 
 export default function Home() {
@@ -11,6 +12,7 @@ export default function Home() {
       <Product360Section />
       <FeaturedProducts />
       <FeaturesSection />
+      <CompetitorComparison />
       <CTASection />
     </>
   );
